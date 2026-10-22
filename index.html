@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Kraken Reef</title>
+<!-- iPad mini 2 (iOS 12): so imagem + JS ES5. Tela cheia ao abrir pelo icone da Tela de Inicio.
+     Publicada em https://kraken-reef.github.io/kraken-tela/ pelo publicar-tela.py. -->
+<link rel="apple-touch-icon" href="icone.png">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  html, body { margin: 0; height: 100%; background: #060B14; overflow: hidden; }
+  /* duas imagens empilhadas: a nova aparece por cima e a outra some (troca suave) */
+  .q { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0;
+       -webkit-transition: opacity .3s ease; transition: opacity .3s ease; pointer-events: none;
+       -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .q.on { opacity: 1; }
+  /* a imagem nao recebe toque: no iOS 12, tocar numa <img> travava o painel */
+  #toque { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 9; cursor: pointer;
+           -webkit-tap-highlight-color: rgba(0,0,0,0); -webkit-touch-callout: none;
+           -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  #pontos { position: fixed; left: 0; right: 0; bottom: 7px; z-index: 3; text-align: center; font-size: 0; }
+  #pontos i { display: inline-block; width: 6px; height: 6px; margin: 0 4px; border-radius: 3px;
+              background: rgba(255,255,255,.22); }
+  #pontos i.on { background: rgba(255,255,255,.9); }
+  #velho { position: fixed; top: 0; left: 0; right: 0; z-index: 4; display: none; padding: 7px 12px;
+           background: rgba(251,191,36,.95); color: #111; text-align: center;
+           font: 600 17px/1.3 -apple-system, Helvetica, Arial, sans-serif; }
+  #noite { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 5; background: #000;
+           opacity: 0; pointer-events: none; -webkit-transition: opacity 3s; transition: opacity 3s; }
+  #diag { position: fixed; left: 8px; bottom: 20px; z-index: 6; display: none; pointer-events: none;
+          font: 14px/1.4 Menlo, monospace; color: #fff; background: rgba(0,0,0,.75); padding: 6px 10px;
+          border-radius: 6px; white-space: pre; }
+</style>
+</head>
+<body>
+<img id="a" class="q" alt="" draggable="false">
+<img id="b" class="q" alt="" draggable="false">
+<div id="pontos"></div>
+<div id="velho"></div>
+<div id="noite"></div>
+<div id="diag"></div>
+<div id="toque"></div>
+<script>
+  // A ordem das telas vem do telas.json (o painel-ipad.py decide; aqui nada e' contado a mao).
+  // 6 s por quadro e troca de .3 s (29/10, eram 5 s); tocar adianta e o relogio recomeca do toque; ao fim da volta recarrega tudo.
+  // 29/10 (v9): saiu a barrinha do tempo na borda de baixo (pedido dele).
+  // 23/10 (v5): troca suave, pontinhos de posicao, modo noite (22h-7h) e faixa
+  // amarela quando o painel nao e' atualizado ha mais de LIMITE_H horas (gravar nao e' publicar).
+  // Licoes do iOS 12: o toque vai numa camada propria (nunca na <img>), o toque so marca o pedido
+  // e o relogio de 1 s faz o trabalho, qualquer erro de JS recarrega em 5 s. #debug mostra o estado.
+  var VERSAO = '29/10 v9';
+  var PASSO = 6000, LIMITE_H = 30, NOITE_DE = 22, NOITE_ATE = 7, ESCURO = 0.7;
+  var seq = ['tela-ipad-0.png'], pos = 0, ultima = 0, pedido = false, gerado = 0, pronto = false;
+  var imgs = [document.getElementById('a'), document.getElementById('b')], vis = 0;
+  var d = { tiques: 0, toques: 0, cliques: 0, carregou: 0, falhou: 0, erro: '-' };
+
+  function pegar(id) { return document.getElementById(id); }
+
+  function lista(fim) {
+    var x = new XMLHttpRequest();
+    x.open('GET', 'telas.json?' + Date.now(), true);
+    x.onload = function () {
+      try {
+        var j = JSON.parse(x.responseText);
+        if (j.seq && j.seq.length) seq = j.seq;
+        gerado = j.gerado || 0;
+      } catch (e) { d.erro = 'telas.json: ' + e.message; }
+      fim();
+    };
+    x.onerror = function () { d.falhou++; fim(); };
+    x.send();
+  }
+
+  function pontos() {                          // um ponto por tela diferente, na ordem em que aparecem
+    var vistos = {}, html = '';
+    for (var k = 0; k < seq.length; k++) {
+      if (!vistos[seq[k]]) { vistos[seq[k]] = 1; html += '<i data-t="' + seq[k] + '"></i>'; }
+    }
+    pegar('pontos').innerHTML = html;
+  }
+
+  function marcar(nome) {
+    var is = pegar('pontos').getElementsByTagName('i');
+    for (var k = 0; k < is.length; k++) is[k].className = is[k].getAttribute('data-t') === nome ? 'on' : '';
+  }
+
+  function mostrar() {
+    ultima = Date.now();
+    if (pos >= seq.length) { location.reload(); return; }
+    var nome = seq[pos++], nova = new Image();
+    nova.onload = function () {               // so troca depois de baixar: sem tela preta no meio
+      var prox = imgs[1 - vis];
+      prox.src = nova.src;
+      prox.className = 'q on';
+      imgs[vis].className = 'q';
+      vis = 1 - vis;
+      d.carregou++;
+      marcar(nome);
+    };
+    nova.onerror = function () { d.falhou++; };
+    nova.src = nome + '?' + Date.now();        // ?hora fura o cache do Safari
+  }
+
+  function idade(ms) {
+    var h = Math.floor(ms / 3600000);
+    return h >= 48 ? Math.floor(h / 24) + ' dias' : h + ' horas';
+  }
+
+  pegar('toque').addEventListener('touchend', function (e) { e.preventDefault(); d.toques++; pedido = true; }, false);
+  pegar('toque').addEventListener('click', function () { d.cliques++; pedido = true; }, false);  // computador
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  if (location.hash === '#debug') pegar('diag').style.display = 'block';
+
+  setInterval(function () {
+    d.tiques++;
+    if (!pronto) return;
+    if (pedido || Date.now() - ultima >= PASSO) { pedido = false; mostrar(); }
+    var h = new Date().getHours(), velho = gerado && Date.now() - gerado > LIMITE_H * 3600000;
+    pegar('noite').style.opacity = (h >= NOITE_DE || h < NOITE_ATE) ? ESCURO : 0;
+    pegar('velho').style.display = velho ? 'block' : 'none';
+    if (velho) pegar('velho').textContent = 'Painel sem atualizar há ' + idade(Date.now() - gerado) +
+      ' — os números podem estar velhos';
+    if (location.hash === '#debug') {
+      pegar('diag').textContent = 'versao ' + VERSAO + '\nquadro ' + pos + '/' + seq.length + '  relogio ' + d.tiques +
+        '\ntroca em ' + Math.max(0, Math.round((PASSO - (Date.now() - ultima)) / 1000)) + ' s' +
+        '\ntoques ' + d.toques + '  cliques ' + d.cliques +
+        '\nimagens ok ' + d.carregou + '  falhas ' + d.falhou +
+        '\ngerado ha ' + (gerado ? idade(Date.now() - gerado) : '?') + '\nerro ' + d.erro;
+    }
+  }, 1000);
+  window.onerror = function (msg) { d.erro = String(msg); setTimeout(function () { location.reload(); }, 5000); };
+  lista(function () { pontos(); pronto = true; mostrar(); });
+</script>
+</body>
+</html>
